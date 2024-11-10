@@ -4,11 +4,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
+	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
-	"strings"
-	"sync"
 )
 
 func createClientConfig(ca, crt, key string) (*tls.Config, error) {
@@ -28,41 +28,21 @@ func createClientConfig(ca, crt, key string) (*tls.Config, error) {
 		return nil, err
 	}
 	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      roots,
+		Certificates:       []tls.Certificate{cert},
+		RootCAs:            roots,
+		InsecureSkipVerify: true,
 	}, nil
 }
 
-func printConnState(conn *tls.Conn) {
-	log.Print(">>>>>>>>>>>>>>>> State <<<<<<<<<<<<<<<<")
-	state := conn.ConnectionState()
-	log.Printf("Version: %x", state.Version)
-	log.Printf("HandshakeComplete: %t", state.HandshakeComplete)
-	log.Printf("DidResume: %t", state.DidResume)
-	log.Printf("CipherSuite: %x", state.CipherSuite)
-	log.Printf("NegotiatedProtocol: %s", state.NegotiatedProtocol)
-	log.Printf("NegotiatedProtocolIsMutual: %t", state.NegotiatedProtocolIsMutual)
-
-	log.Print("Certificate chain:")
-	for i, cert := range state.PeerCertificates {
-		subject := cert.Subject
-		issuer := cert.Issuer
-		log.Printf(" %d s:/C=%v/ST=%v/L=%v/O=%v/OU=%v/CN=%s", i, subject.Country, subject.Province, subject.Locality, subject.Organization, subject.OrganizationalUnit, subject.CommonName)
-		log.Printf("   i:/C=%v/ST=%v/L=%v/O=%v/OU=%v/CN=%s", issuer.Country, issuer.Province, issuer.Locality, issuer.Organization, issuer.OrganizationalUnit, issuer.CommonName)
-	}
-	log.Print(">>>>>>>>>>>>>>>> State End <<<<<<<<<<<<<<<<")
-}
-
 func main() {
-	connect := flag.String("connect", "localhost:4433", "who to connect to")
+	connect := flag.String("connect", "", "who to connect to")
 	ca := flag.String("ca", "./certs/ca.crt", "root certificate")
 	crt := flag.String("crt", "./certs/client.crt", "certificate")
 	key := flag.String("key", "./certs/client.key", "key")
 	flag.Parse()
 
-	addr := *connect
-	if !strings.Contains(addr, ":") {
-		addr += ":443"
+	if *connect == "" {
+		log.Fatalf("please specify connection address")
 	}
 
 	config, err := createClientConfig(*ca, *crt, *key)
@@ -70,26 +50,16 @@ func main() {
 		log.Fatalf("config failed: %s", err.Error())
 	}
 
-	conn, err := tls.Dial("tcp", addr, config)
-	if err != nil {
-		log.Fatalf("failed to connect: %s", err.Error())
+	tr := &http.Transport{
+		TLSClientConfig: config,
 	}
-	defer conn.Close()
-
-	log.Printf("connect to %s succeed", addr)
-	printConnState(conn)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		io.Copy(conn, os.Stdin)
-		wg.Done()
-	}()
-
-	wg.Add(1)
-	go func() {
-		io.Copy(os.Stdout, conn)
-		wg.Done()
-	}()
-	wg.Wait()
+	client := &http.Client{Transport: tr}
+	resp, err := client.Get(*connect)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+	msg, _ := io.ReadAll(resp.Body)
+	fmt.Print(string(msg))
+	return
 }

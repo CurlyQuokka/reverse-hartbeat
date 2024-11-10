@@ -4,14 +4,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
-	"io"
-	"io/ioutil"
 	"log"
-	"net"
+	"net/http"
+	"os"
 )
 
 func createServerConfig(ca, crt, key string) (*tls.Config, error) {
-	caCertPEM, err := ioutil.ReadFile(ca)
+	caCertPEM, err := os.ReadFile(ca)
 	if err != nil {
 		return nil, err
 	}
@@ -33,28 +32,12 @@ func createServerConfig(ca, crt, key string) (*tls.Config, error) {
 	}, nil
 }
 
-func printConnState(conn *tls.Conn) {
-	log.Print(">>>>>>>>>>>>>>>> State <<<<<<<<<<<<<<<<")
-	state := conn.ConnectionState()
-	log.Printf("Version: %x", state.Version)
-	log.Printf("HandshakeComplete: %t", state.HandshakeComplete)
-	log.Printf("DidResume: %t", state.DidResume)
-	log.Printf("CipherSuite: %x", state.CipherSuite)
-	log.Printf("NegotiatedProtocol: %s", state.NegotiatedProtocol)
-	log.Printf("NegotiatedProtocolIsMutual: %t", state.NegotiatedProtocolIsMutual)
-
-	log.Print("Certificate chain:")
-	for i, cert := range state.PeerCertificates {
-		subject := cert.Subject
-		issuer := cert.Issuer
-		log.Printf(" %d s:/C=%v/ST=%v/L=%v/O=%v/OU=%v/CN=%s", i, subject.Country, subject.Province, subject.Locality, subject.Organization, subject.OrganizationalUnit, subject.CommonName)
-		log.Printf("   i:/C=%v/ST=%v/L=%v/O=%v/OU=%v/CN=%s", issuer.Country, issuer.Province, issuer.Locality, issuer.Organization, issuer.OrganizationalUnit, issuer.CommonName)
-	}
-	log.Print(">>>>>>>>>>>>>>>> State End <<<<<<<<<<<<<<<<")
+func httpRequestHandler(w http.ResponseWriter, req *http.Request) {
+	w.Write([]byte("Hello,World!\n"))
 }
 
 func main() {
-	listen := flag.String("listen", "localhost:4433", "which port to listen")
+	listen := flag.String("listen", ":4433", "which address to listen")
 	ca := flag.String("ca", "./certs/ca.crt", "root certificate")
 	crt := flag.String("crt", "./certs/server.crt", "certificate")
 	key := flag.String("key", "./certs/server.key", "key")
@@ -65,26 +48,12 @@ func main() {
 		log.Fatalf("config failed: %s", err.Error())
 	}
 
-	ln, err := tls.Listen("tcp", *listen, config)
-	if err != nil {
-		log.Fatalf("listen failed: %s", err.Error())
+	server := http.Server{
+		Addr:      *listen,
+		Handler:   http.HandlerFunc(httpRequestHandler),
+		TLSConfig: config,
 	}
+	defer server.Close()
 
-	log.Printf("listen on %s", *listen)
-
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			log.Fatalf("accept failed: %s", err.Error())
-			break
-		}
-		log.Printf("connection open: %s", conn.RemoteAddr())
-		printConnState(conn.(*tls.Conn))
-
-		go func(c net.Conn) {
-			wr, _ := io.Copy(c, c)
-			c.Close()
-			log.Printf("connection close: %s, written: %d", conn.RemoteAddr(), wr)
-		}(conn)
-	}
+	server.ListenAndServeTLS("", "")
 }
