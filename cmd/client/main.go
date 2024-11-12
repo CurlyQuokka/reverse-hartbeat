@@ -1,38 +1,15 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"os"
+
+	"github.com/curlyquokka/reverse-hearthbeat/pkg/certs"
 )
-
-func createClientConfig(ca, crt, key string) (*tls.Config, error) {
-	caCertPEM, err := os.ReadFile(ca)
-	if err != nil {
-		return nil, err
-	}
-
-	roots := x509.NewCertPool()
-	ok := roots.AppendCertsFromPEM(caCertPEM)
-	if !ok {
-		panic("failed to parse root certificate")
-	}
-
-	cert, err := tls.LoadX509KeyPair(crt, key)
-	if err != nil {
-		return nil, err
-	}
-	return &tls.Config{
-		Certificates:       []tls.Certificate{cert},
-		RootCAs:            roots,
-		InsecureSkipVerify: true,
-	}, nil
-}
 
 func main() {
 	connect := flag.String("connect", "", "who to connect to")
@@ -45,7 +22,7 @@ func main() {
 		log.Fatalf("please specify connection address")
 	}
 
-	config, err := createClientConfig(*ca, *crt, *key)
+	config, err := certs.CreateClientConfig(*ca, *crt, *key)
 	if err != nil {
 		log.Fatalf("config failed: %s", err.Error())
 	}
@@ -54,7 +31,13 @@ func main() {
 		TLSClientConfig: config,
 	}
 	client := &http.Client{Transport: tr}
-	resp, err := client.Get(*connect)
+
+	body := []byte(`{
+		"id": "some-service",
+		"value": "running"
+	}`)
+
+	resp, err := client.Post(*connect, "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		panic(err)
 	}

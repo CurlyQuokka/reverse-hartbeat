@@ -6,5 +6,7 @@ const (
 )
 
 type Info struct {
-	Value string `json:"value"`
+	ID      string `json:"id"`
+	Value   string `json:"value"`
+	Message string `json:"message,omitempty"`
 }
